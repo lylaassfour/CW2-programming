@@ -12,6 +12,29 @@ using namespace std;
 
 #define PORT 54321
 #define SHIFT 3
+#define CAESAR_KEY "MYKEY" // Assigned Caesar cipher key
+
+// Function to encrypt message using Caesar cipher
+string encryptMessage(const string& message) {
+    string encryptedMessage = message;
+    for (char& c : encryptedMessage) {
+        if (isalpha(c)) {
+            c = 'a' + (c - 'a' + SHIFT) % 26; // Add SHIFT to each character
+        }
+    }
+    return encryptedMessage;
+}
+
+// Function to decrypt Caesar cipher encrypted message
+string decryptMessage(const string& encryptedMessage) {
+    string decryptedMessage = encryptedMessage;
+    for (char& c : decryptedMessage) {
+        if (isalpha(c)) {
+            c = 'a' + (c - 'a' - SHIFT + 26) % 26; // Subtract SHIFT from each character
+        }
+    }
+    return decryptedMessage;
+}
 
 // Function to save username and password to a text file with Caesar cipher encryption
 void saveCredentials(const string& username, const string& password) {
@@ -19,11 +42,7 @@ void saveCredentials(const string& username, const string& password) {
     string encryptedPassword = password;
     for (char& c : encryptedPassword) {
         if (isalpha(c)) {
-            if (islower(c)) {
-                c = 'a' + (c - 'a' + SHIFT) % 26;
-            } else {
-                c = 'A' + (c - 'A' + SHIFT) % 26;
-            }
+            c = 'a' + (c - 'a' + SHIFT) % 26;
         }
     }
 
@@ -43,11 +62,7 @@ string decryptPassword(const string& encryptedPassword) {
     string decryptedPassword = encryptedPassword;
     for (char& c : decryptedPassword) {
         if (isalpha(c)) {
-            if (islower(c)) {
-                c = 'a' + (c - 'a' - SHIFT + 26) % 26;
-            } else {
-                c = 'A' + (c - 'A' - SHIFT + 26) % 26;
-            }
+            c = 'a' + (c - 'a' - SHIFT + 26) % 26;
         }
     }
     return decryptedPassword;
@@ -87,19 +102,6 @@ bool login(const string& username, const string& password, int sockfd) {
     return false;
 }
 
-// Function to handle receiving messages from the server
-void handleReceive(int sockfd) {
-    char buffer[1024] = {0};
-    while (true) {
-        int valread = read(sockfd, buffer, sizeof(buffer));
-        if (valread <= 0) {
-            cerr << "Connection closed by server." << endl;
-            break;
-        }
-        cout << "Server: " << buffer << endl;
-    }
-}
-
 // Function to handle sending messages to the server
 void handleSend(int sockfd) {
     string message;
@@ -113,11 +115,30 @@ void handleSend(int sockfd) {
             continue;
         }
 
+        // Encrypt message using Caesar cipher
+        string encryptedMessage = encryptMessage(message);
+
         // Send the message along with null terminator
-        if (send(sockfd, message.c_str(), message.length() + 1, 0) <= 0) {
+        if (send(sockfd, encryptedMessage.c_str(), encryptedMessage.length() + 1, 0) <= 0) {
             cerr << "Message sending failed. Server may have closed the connection." << endl;
             break;
         }
+    }
+}
+
+// Function to handle receiving messages from the server
+void handleReceive(int sockfd) {
+    char buffer[1024] = {0};
+    while (true) {
+        int valread = read(sockfd, buffer, sizeof(buffer));
+        if (valread <= 0) {
+            cerr << "Connection closed by server." << endl;
+            break;
+        }
+
+        // Decrypt received message using Caesar cipher
+        string decryptedMessage = decryptMessage(buffer);
+        cout << "Server: " << decryptedMessage << endl;
     }
 }
 
@@ -130,7 +151,10 @@ void handleClientReceive(int sockfd) {
             cerr << "Connection closed." << endl;
             break;
         }
-        cout << "Message from another client: " << buffer << endl;
+
+        // Decrypt received message from another client using Caesar cipher
+        string decryptedMessage = decryptMessage(buffer);
+        cout << "Message from another client: " << decryptedMessage << endl;
     }
 }
 
