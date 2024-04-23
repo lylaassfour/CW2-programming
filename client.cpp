@@ -7,19 +7,15 @@
 #include <unistd.h>
 #include <netinet/in.h>
 #include <thread> // for multi-threading
-#include <openssl/evp.h>
-#include <openssl/rand.h>
 
 using namespace std;
 
 #define PORT 54321
 #define SHIFT 3
-#define AES_KEY_LENGTH 256
-#define AES_BLOCK_SIZE 16
 
 // Function to save username and password to a text file with Caesar cipher encryption
 void saveCredentials(const string& username, const string& password) {
-    // Encrypt password using Caesar cipher (not secure, only for demonstration)
+    // Encrypt password using Caesar cipher
     string encryptedPassword = password;
     for (char& c : encryptedPassword) {
         if (isalpha(c)) {
@@ -57,52 +53,6 @@ string decryptPassword(const string& encryptedPassword) {
     return decryptedPassword;
 }
 
-// AES encryption function
-string aesEncrypt(const string& plainText, const string& key) {
-    string cipherText;
-    EVP_CIPHER_CTX* ctx = EVP_CIPHER_CTX_new();
-    if (!ctx) {
-        cerr << "AES encryption initialization failed." << endl;
-        return "";
-    }
-
-    if (EVP_EncryptInit_ex(ctx, EVP_aes_256_cbc(), NULL, (const unsigned char*)key.c_str(), (const unsigned char*)"0000000000000000") != 1) {
-        cerr << "AES encryption initialization failed." << endl;
-        EVP_CIPHER_CTX_free(ctx);
-        return "";
-    }
-
-    int len;
-    int maxLen = plainText.length() + AES_BLOCK_SIZE;
-    unsigned char* ciphertext = new unsigned char[maxLen];
-    if (!ciphertext) {
-        cerr << "Memory allocation failed." << endl;
-        EVP_CIPHER_CTX_free(ctx);
-        return "";
-    }
-
-    if (EVP_EncryptUpdate(ctx, ciphertext, &len, (const unsigned char*)plainText.c_str(), plainText.length()) != 1) {
-        cerr << "AES encryption failed." << endl;
-        delete[] ciphertext;
-        EVP_CIPHER_CTX_free(ctx);
-        return "";
-    }
-    cipherText.assign(reinterpret_cast<char*>(ciphertext), len);
-
-    if (EVP_EncryptFinal_ex(ctx, ciphertext + len, &len) != 1) {
-        cerr << "AES encryption finalization failed." << endl;
-        delete[] ciphertext;
-        EVP_CIPHER_CTX_free(ctx);
-        return "";
-    }
-    cipherText.append(reinterpret_cast<char*>(ciphertext + len), len);
-
-    delete[] ciphertext;
-    EVP_CIPHER_CTX_free(ctx);
-
-    return cipherText;
-}
-
 // Function to handle signup process
 void signUp() {
     string username, password;
@@ -126,8 +76,6 @@ bool login(const string& username, const string& password, int sockfd) {
                 string decryptedPassword = decryptPassword(storedPassword);
                 if (password == decryptedPassword) {
                     cout << "Login successful!" << endl;
-                    // Notify the server of successful login
-                    send(sockfd, "login", strlen("login"), 0);
                     return true;
                 }
             }
@@ -140,7 +88,7 @@ bool login(const string& username, const string& password, int sockfd) {
 }
 
 // Function to handle receiving messages from the server
-void handleReceive(int sockfd, const string& key) {
+void handleReceive(int sockfd) {
     char buffer[1024] = {0};
     while (true) {
         int valread = read(sockfd, buffer, sizeof(buffer));
@@ -148,23 +96,41 @@ void handleReceive(int sockfd, const string& key) {
             cerr << "Connection closed by server." << endl;
             break;
         }
-        string encryptedMessage(buffer);
-        string decryptedMessage = aesDecrypt(encryptedMessage, key);
-        cout << "Server: " << decryptedMessage << endl;
+        cout << "Server: " << buffer << endl;
     }
 }
 
 // Function to handle sending messages to the server
-void handleSend(int sockfd, const string& key) {
+void handleSend(int sockfd) {
     string message;
     while (true) {
         cout << "You: ";
         getline(cin, message);
-        string encryptedMessage = aesEncrypt(message, key);
-        if (send(sockfd, encryptedMessage.c_str(), encryptedMessage.length(), 0) <= 0) {
+
+        // Ensure message is not empty
+        if (message.empty()) {
+            cerr << "Message cannot be empty." << endl;
+            continue;
+        }
+
+        // Send the message along with null terminator
+        if (send(sockfd, message.c_str(), message.length() + 1, 0) <= 0) {
             cerr << "Message sending failed. Server may have closed the connection." << endl;
             break;
         }
+    }
+}
+
+// Function to handle receiving messages from other clients
+void handleClientReceive(int sockfd) {
+    char buffer[1024] = {0};
+    while (true) {
+        int valread = read(sockfd, buffer, sizeof(buffer));
+        if (valread <= 0) {
+            cerr << "Connection closed." << endl;
+            break;
+        }
+        cout << "Message from another client: " << buffer << endl;
     }
 }
 
@@ -211,23 +177,21 @@ int main() {
         return 1;
     }
 
-    // Generate a random AES key
-    unsigned char aesKey[AES_KEY_LENGTH / 8];
-    if (RAND_bytes(aesKey, AES_KEY_LENGTH / 8) != 1) {
-        cerr << "Failed to generate AES key." << endl;
-        return 1;
-    }
-    string key(reinterpret_cast<char*>(aesKey), AES_KEY_LENGTH / 8);
-
     if (login(username, password, sockfd)) {
+        // Notify the server of successful login
+        send(sockfd, "login", strlen("login"), 0);
+
         // Create threads for sending and receiving messages
-        thread sendThread(handleSend, sockfd, key);
-        thread receiveThread(handleReceive, sockfd, key);
+        thread sendThread(handleSend, sockfd);
+        thread receiveThread(handleReceive, sockfd);
+        thread clientReceiveThread(handleClientReceive, sockfd);
 
         // Join the threads
         sendThread.join();
         receiveThread.join();
+        clientReceiveThread.join();
     }
 
+    close(sockfd); // Close socket when finished
     return 0;
 }
